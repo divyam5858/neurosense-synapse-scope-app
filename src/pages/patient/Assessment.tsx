@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,10 +9,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
-import { ChevronLeft, ChevronRight, Save } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { ChevronLeft, ChevronRight, Save, Mic, Volume2, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { AssessmentFormData } from "@/types";
+import { AudioRecorder } from "@/utils/audioRecorder";
+import { supabase } from "@/integrations/supabase/client";
 
 const Assessment = () => {
   const [currentPage, setCurrentPage] = useState(1);
@@ -26,6 +29,11 @@ const Assessment = () => {
     medications: [],
     neurologicalSymptoms: [],
   });
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState("");
+  const [audioRecorder] = useState(() => new AudioRecorder());
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -71,6 +79,90 @@ const Assessment = () => {
     }, 2000);
   };
 
+  const speakQuestion = async (text: string) => {
+    try {
+      setIsPlaying(true);
+      setCurrentQuestion(text);
+      
+      const { data, error } = await supabase.functions.invoke('text-to-speech', {
+        body: { text }
+      });
+
+      if (error) throw error;
+
+      const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
+      audio.onended = () => setIsPlaying(false);
+      await audio.play();
+    } catch (error) {
+      console.error('Error speaking question:', error);
+      toast({
+        title: "Error",
+        description: "Failed to play audio. Please try again.",
+        variant: "destructive",
+      });
+      setIsPlaying(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      await audioRecorder.startRecording();
+      setIsRecording(true);
+      toast({
+        title: "Recording Started",
+        description: "Please speak your answer in Kannada",
+      });
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      toast({
+        title: "Error",
+        description: "Failed to start recording. Please check microphone permissions.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      setIsRecording(false);
+      const base64Audio = await audioRecorder.stopRecording();
+      
+      toast({
+        title: "Processing",
+        description: "Transcribing your response...",
+      });
+
+      const { data, error } = await supabase.functions.invoke('speech-to-text', {
+        body: { audio: base64Audio }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: `Transcription: ${data.text}`,
+      });
+
+      // Process the transcribed text and update form data accordingly
+      // This is a simple example - you'd want more sophisticated mapping
+      console.log('Transcribed text:', data.text);
+      
+    } catch (error) {
+      console.error('Error processing recording:', error);
+      toast({
+        title: "Error",
+        description: "Failed to process recording. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (voiceMode && currentPage === 1) {
+      speakQuestion("ನಿಮ್ಮ ವಯಸ್ಸು ಎಷ್ಟು? (What is your age?)");
+    }
+  }, [voiceMode, currentPage]);
+
   return (
     <Layout>
       <div className="max-w-3xl mx-auto space-y-6">
@@ -78,6 +170,61 @@ const Assessment = () => {
           <h1 className="text-3xl font-bold">Neurological Risk Assessment</h1>
           <p className="text-muted-foreground mt-1">Page {currentPage} of {totalPages}</p>
         </div>
+
+        <Card className="bg-muted/50">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <Label htmlFor="voice-mode" className="text-base font-semibold">
+                  Voice Mode (Kannada)
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Listen to questions and respond with your voice
+                </p>
+              </div>
+              <Switch
+                id="voice-mode"
+                checked={voiceMode}
+                onCheckedChange={setVoiceMode}
+              />
+            </div>
+            
+            {voiceMode && (
+              <div className="mt-4 flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => speakQuestion(currentQuestion)}
+                  disabled={isPlaying || isRecording}
+                >
+                  <Volume2 className="h-4 w-4 mr-2" />
+                  {isPlaying ? "Playing..." : "Replay Question"}
+                </Button>
+                
+                {isRecording ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={stopRecording}
+                  >
+                    <Square className="h-4 w-4 mr-2" />
+                    Stop Recording
+                  </Button>
+                ) : (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={startRecording}
+                    disabled={isPlaying}
+                  >
+                    <Mic className="h-4 w-4 mr-2" />
+                    Record Answer
+                  </Button>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         <Progress value={progress} className="h-2" />
 
