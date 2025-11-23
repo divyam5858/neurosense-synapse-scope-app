@@ -47,42 +47,80 @@ serve(async (req) => {
       throw new Error('No audio data provided');
     }
 
+    const SARVAM_API_KEY = Deno.env.get('SARVAM_API_KEY');
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      throw new Error('OpenAI API key not configured');
-    }
-
+    
     console.log('Processing audio for transcription');
 
     const binaryAudio = processBase64Chunks(audio);
     
-    const formData = new FormData();
-    const blob = new Blob([binaryAudio], { type: 'audio/webm' });
-    formData.append('file', blob, 'audio.webm');
-    formData.append('model', 'whisper-1');
-    formData.append('language', 'kn'); // Kannada language code
+    // Try Sarvam AI first (primary)
+    if (SARVAM_API_KEY) {
+      try {
+        console.log('Attempting transcription with Sarvam AI');
+        const formData = new FormData();
+        const blob = new Blob([binaryAudio], { type: 'audio/webm' });
+        formData.append('file', blob, 'audio.webm');
+        formData.append('model', 'saarika:v2.5');
+        formData.append('language_code', 'kn-IN'); // Kannada language code
 
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: formData,
-    });
+        const response = await fetch('https://api.sarvam.ai/speech-to-text', {
+          method: 'POST',
+          headers: {
+            'api-subscription-key': SARVAM_API_KEY,
+          },
+          body: formData,
+        });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('OpenAI Whisper error:', error);
-      throw new Error(`Transcription failed: ${error}`);
+        if (response.ok) {
+          const result = await response.json();
+          console.log('Sarvam AI transcription successful:', result.transcript);
+          return new Response(
+            JSON.stringify({ text: result.transcript, provider: 'sarvam' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        } else {
+          const error = await response.text();
+          console.warn('Sarvam AI failed, attempting fallback:', error);
+        }
+      } catch (sarvamError) {
+        console.warn('Sarvam AI error, attempting fallback:', sarvamError);
+      }
     }
 
-    const result = await response.json();
-    console.log('Transcription result:', result.text);
+    // Fallback to OpenAI
+    if (OPENAI_API_KEY) {
+      console.log('Attempting transcription with OpenAI (fallback)');
+      const formData = new FormData();
+      const blob = new Blob([binaryAudio], { type: 'audio/webm' });
+      formData.append('file', blob, 'audio.webm');
+      formData.append('model', 'whisper-1');
+      formData.append('language', 'kn'); // Kannada language code
 
-    return new Response(
-      JSON.stringify({ text: result.text }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('OpenAI Whisper error:', error);
+        throw new Error(`Both Sarvam and OpenAI transcription failed. OpenAI error: ${error}`);
+      }
+
+      const result = await response.json();
+      console.log('OpenAI transcription successful (fallback):', result.text);
+
+      return new Response(
+        JSON.stringify({ text: result.text, provider: 'openai' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    throw new Error('No API keys configured for speech-to-text');
 
   } catch (error) {
     console.error('Error in speech-to-text:', error);

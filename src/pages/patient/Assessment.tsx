@@ -34,8 +34,30 @@ const Assessment = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [audioRecorder] = useState(() => new AudioRecorder());
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  // Load available voices for browser TTS
+  useEffect(() => {
+    const loadVoices = () => {
+      const availableVoices = window.speechSynthesis.getVoices();
+      setVoices(availableVoices);
+    };
+
+    // Load voices initially
+    loadVoices();
+
+    // Some browsers require waiting for voices to load
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    return () => {
+      // Cleanup: cancel any ongoing speech
+      window.speechSynthesis.cancel();
+    };
+  }, []);
 
   const totalPages = 4;
   const progress = (currentPage / totalPages) * 100;
@@ -84,6 +106,52 @@ const Assessment = () => {
       setIsPlaying(true);
       setCurrentQuestion(text);
       
+      // Try browser TTS first (primary)
+      if ('speechSynthesis' in window) {
+        // Cancel any ongoing speech
+        window.speechSynthesis.cancel();
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Try to find a Kannada voice
+        const kannadaVoice = voices.find(voice => 
+          voice.lang.startsWith('kn') || voice.lang.includes('Kannada')
+        );
+        
+        if (kannadaVoice) {
+          utterance.voice = kannadaVoice;
+        }
+        
+        utterance.lang = 'kn-IN';
+        utterance.rate = 0.9; // Slightly slower for clarity
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+        
+        utterance.onend = () => setIsPlaying(false);
+        utterance.onerror = (error) => {
+          console.warn('Browser TTS error, attempting fallback:', error);
+          // Fallback to edge function
+          useTTSEdgeFunction(text);
+        };
+        
+        window.speechSynthesis.speak(utterance);
+      } else {
+        // Fallback to edge function if browser doesn't support TTS
+        await useTTSEdgeFunction(text);
+      }
+    } catch (error) {
+      console.error('Error speaking question:', error);
+      toast({
+        title: "Error",
+        description: "Failed to play audio. Please try again.",
+        variant: "destructive",
+      });
+      setIsPlaying(false);
+    }
+  };
+
+  const useTTSEdgeFunction = async (text: string) => {
+    try {
       const { data, error } = await supabase.functions.invoke('text-to-speech', {
         body: { text }
       });
@@ -94,7 +162,7 @@ const Assessment = () => {
       audio.onended = () => setIsPlaying(false);
       await audio.play();
     } catch (error) {
-      console.error('Error speaking question:', error);
+      console.error('TTS edge function error:', error);
       toast({
         title: "Error",
         description: "Failed to play audio. Please try again.",
