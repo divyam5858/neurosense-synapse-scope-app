@@ -1,4 +1,4 @@
-// --- FULL PATCHED FILE STARTS HERE ---
+// --- FULLY UPDATED & FIXED FILE ---
 
 import { useState, useEffect } from "react";
 import { Layout } from "@/components/Layout";
@@ -21,7 +21,6 @@ import { supabase } from "@/integrations/supabase/client";
 
 const Assessment = () => {
   const [currentPage, setCurrentPage] = useState(1);
-
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   const [formData, setFormData] = useState<Partial<AssessmentFormData>>({
@@ -47,35 +46,15 @@ const Assessment = () => {
   const totalPages = 4;
   const progress = (currentPage / totalPages) * 100;
 
-  // -------------------------------
-  // NEW: QUESTION ORDER PER PAGE
-  // -------------------------------
+  // QUESTION ORDER
   const questionOrder = {
-    1: [
-      "age",
-      "gender",
-      "weight",
-      "height",
-      "education",
-      "occupation",
-      "languagePreference",
-    ],
+    1: ["age", "gender", "weight", "height", "education", "occupation", "languagePreference"],
     2: ["familyHistory", "medicalConditions", "medications", "allergies"],
-    3: [
-      "physicalActivity",
-      "sleepQuality",
-      "alcoholConsumption",
-      "smokingStatus",
-      "dietType",
-      "coffeeConsumption",
-      "socialEngagement",
-    ],
+    3: ["physicalActivity", "sleepQuality", "alcoholConsumption", "smokingStatus", "dietType", "coffeeConsumption", "socialEngagement"],
     4: ["memoryComplaints", "speechIssues", "neurologicalSymptoms", "moodChanges"],
   };
 
-  // --------------------------------------------
-  // NEW: KANNADA TRANSLATIONS FOR EACH QUESTION
-  // --------------------------------------------
+  // KANNADA QUESTIONS
   const kannadaQuestions: Record<string, string> = {
     age: "ನಿಮ್ಮ ವಯಸ್ಸು ಎಷ್ಟು?",
     gender: "ನಿಮ್ಮ ಲಿಂಗ ಯಾವುದು?",
@@ -104,53 +83,39 @@ const Assessment = () => {
     moodChanges: "ನಿಮ್ಮ ಮನೋಭಾವದಲ್ಲಿ ಯಾವುದೇ ಬದಲಾವಣೆ ಇರುವುದನ್ನು ಗಮನಿಸಿದ್ದೀರಾ?",
   };
 
-  // --------------------------------------------
-  // NEW: SET INITIAL QUESTION WHEN PAGE CHANGES
-  // --------------------------------------------
-  useEffect(() => {
-    if (voiceMode) {
-      setCurrentQuestionIndex(0);
-      const qKey = questionOrder[currentPage][0];
-      setCurrentQuestion(kannadaQuestions[qKey]);
-    }
-  }, [currentPage, voiceMode]);
-
-  // --------------------------------------------
-  // Original: Load voices
-  // --------------------------------------------
+  // Load voices
   useEffect(() => {
     const loadVoices = () => {
-      const availableVoices = window.speechSynthesis.getVoices();
-      setVoices(availableVoices);
+      const v = window.speechSynthesis.getVoices();
+      setVoices(v);
     };
     loadVoices();
-
-    if (window.speechSynthesis.onvoiceschanged !== undefined) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
-    }
-
-    return () => window.speechSynthesis.cancel();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
-  const handleInputChange = (field: keyof AssessmentFormData, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
+  // Ensure currentQuestion is always set
+  useEffect(() => {
+    if (!voiceMode) return;
+    const firstKey = questionOrder[currentPage][0];
+    setCurrentQuestionIndex(0);
+    setCurrentQuestion(kannadaQuestions[firstKey]);
+  }, [voiceMode, currentPage, voices]);
 
-  const handleCheckboxChange = (field: keyof AssessmentFormData, value: string, checked: boolean) => {
+  const handleInputChange = (field: keyof AssessmentFormData, value: any) =>
+    setFormData((prev) => ({ ...prev, [field]: value }));
+
+  const handleCheckboxChange = (field: keyof AssessmentFormData, value: string, checked: boolean) =>
     setFormData((prev) => {
       const arr = (prev[field] as string[]) || [];
       return { ...prev, [field]: checked ? [...arr, value] : arr.filter((v) => v !== value) };
     });
-  };
 
   const handleNext = () => {
     if (currentPage < totalPages) setCurrentPage(currentPage + 1);
-    window.scrollTo(0, 0);
   };
 
   const handlePrevious = () => {
     if (currentPage > 1) setCurrentPage(currentPage - 1);
-    window.scrollTo(0, 0);
   };
 
   const handleSubmit = () => {
@@ -161,93 +126,62 @@ const Assessment = () => {
     setTimeout(() => navigate("/patient/results"), 2000);
   };
 
-  // --------------------------------------------
-  // TTS
-  // --------------------------------------------
+  // SPEAK QUESTION
   const speakQuestion = async (text: string) => {
+    if (!text || text.trim() === "") {
+      toast({ title: "Error", description: "No question available to read.", variant: "destructive" });
+      return;
+    }
+
+    setIsPlaying(true);
+
     try {
-      setIsPlaying(true);
-      setCurrentQuestion(text);
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
 
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
+      const knVoice = voices.find((v) => v.lang.startsWith("kn"));
+      if (knVoice) u.voice = knVoice;
 
-        const kannadaVoice = voices.find(v => v.lang.startsWith("kn"));
-        if (kannadaVoice) u.voice = kannadaVoice;
+      u.lang = "kn-IN";
+      u.rate = 0.9;
 
-        u.lang = "kn-IN";
-        u.rate = 0.9;
-        u.pitch = 1;
-        u.volume = 1;
+      u.onend = () => setIsPlaying(false);
+      u.onerror = () => setIsPlaying(false);
 
-        u.onend = () => setIsPlaying(false);
-        u.onerror = () => useTTSEdgeFunction(text);
-        window.speechSynthesis.speak(u);
-      } else {
-        await useTTSEdgeFunction(text);
-      }
+      window.speechSynthesis.speak(u);
     } catch {
       setIsPlaying(false);
     }
   };
 
-  const useTTSEdgeFunction = async (text: string) => {
-    try {
-      const { data } = await supabase.functions.invoke("text-to-speech", { body: { text } });
-      const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
-      audio.onended = () => setIsPlaying(false);
-      await audio.play();
-    } catch {
-      setIsPlaying(false);
-    }
-  };
-
-  // --------------------------------------------
-  // Recording → next question update
-  // --------------------------------------------
+  // RECORDING
   const startRecording = async () => {
-    try {
-      await audioRecorder.startRecording();
-      setIsRecording(true);
-
-      toast({
-        title: "Recording Started",
-        description: "Please speak your answer in Kannada",
-      });
-    } catch {}
+    await audioRecorder.startRecording();
+    setIsRecording(true);
+    toast({ title: "Recording Started", description: "Speak your answer in Kannada" });
   };
 
   const stopRecording = async () => {
-    try {
-      setIsRecording(false);
-      const base64 = await audioRecorder.stopRecording();
+    setIsRecording(false);
+    const base64 = await audioRecorder.stopRecording();
 
-      const { data } = await supabase.functions.invoke("speech-to-text", {
-        body: { audio: base64 },
-      });
+    const { data } = await supabase.functions.invoke("speech-to-text", {
+      body: { audio: base64 },
+    });
 
-      toast({
-        title: "Success",
-        description: `Transcription: ${data.text}`,
-      });
+    toast({ title: "Success", description: `Transcription: ${data.text}` });
 
-      // --- MOVE TO NEXT QUESTION ---
-      const nextIndex = currentQuestionIndex + 1;
-      const questions = questionOrder[currentPage];
+    // NEXT QUESTION
+    const nextIndex = currentQuestionIndex + 1;
+    const questions = questionOrder[currentPage];
 
-      if (nextIndex < questions.length) {
-        const nextKey = questions[nextIndex];
-        setCurrentQuestionIndex(nextIndex);
-        setCurrentQuestion(kannadaQuestions[nextKey]);
-      }
-
-    } catch {}
+    if (nextIndex < questions.length) {
+      const nextKey = questions[nextIndex];
+      setCurrentQuestionIndex(nextIndex);
+      setCurrentQuestion(kannadaQuestions[nextKey]);
+    }
   };
 
-  // --------------------------------------------
-  // JSX
-  // --------------------------------------------
   return (
     <Layout>
       <div className="max-w-3xl mx-auto space-y-6">
@@ -264,9 +198,7 @@ const Assessment = () => {
             <div className="flex items-center justify-between">
               <div>
                 <Label className="text-base font-semibold">Voice Mode (Kannada)</Label>
-                <p className="text-sm text-muted-foreground">
-                  Listen to questions and respond with your voice
-                </p>
+                <p className="text-sm text-muted-foreground">Listen to questions and respond with your voice</p>
               </div>
 
               <Switch checked={voiceMode} onCheckedChange={setVoiceMode} />
@@ -286,7 +218,8 @@ const Assessment = () => {
 
                 {isRecording ? (
                   <Button variant="destructive" size="sm" onClick={stopRecording}>
-                    <Square className="h-4 w-4 mr-2" /> Stop Recording
+                    <Square className="h-4 w-4 mr-2" />
+                    Stop
                   </Button>
                 ) : (
                   <Button
@@ -295,7 +228,8 @@ const Assessment = () => {
                     onClick={startRecording}
                     disabled={isPlaying}
                   >
-                    <Mic className="h-4 w-4 mr-2" /> Record Answer
+                    <Mic className="h-4 w-4 mr-2" />
+                    Record
                   </Button>
                 )}
               </div>
@@ -303,9 +237,8 @@ const Assessment = () => {
           </CardContent>
         </Card>
 
-        {/* PROGRESS BAR */}
+        {/* PROGRESS */}
         <Progress value={progress} className="h-2" />
-
 
         {/* Page 1: Demographics */}
         {currentPage === 1 && (
