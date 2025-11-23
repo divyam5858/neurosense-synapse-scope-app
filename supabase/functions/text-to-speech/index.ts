@@ -18,42 +18,88 @@ serve(async (req) => {
       throw new Error('Text is required');
     }
 
+    const SARVAM_API_KEY = Deno.env.get('SARVAM_API_KEY');
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
-      throw new Error('OpenAI API key not configured');
-    }
 
     console.log('Generating speech for text:', text.substring(0, 50));
 
-    const response = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'tts-1',
-        input: text,
-        voice: 'alloy',
-        response_format: 'mp3',
-      }),
-    });
+    // Try Sarvam AI first (primary)
+    if (SARVAM_API_KEY) {
+      try {
+        console.log('Attempting TTS with Sarvam AI');
+        const response = await fetch('https://api.sarvam.ai/text-to-speech', {
+          method: 'POST',
+          headers: {
+            'api-subscription-key': SARVAM_API_KEY,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            target_language_code: 'kn-IN', // Kannada
+            speaker: 'anushka',
+            pitch: 0,
+            pace: 1.0,
+            loudness: 1.5,
+            speech_sample_rate: 8000,
+            enable_preprocessing: true,
+            model: 'bulbul:v2',
+            inputs: [text]
+          }),
+        });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('OpenAI TTS error:', error);
-      throw new Error(`Failed to generate speech: ${error}`);
+        if (response.ok) {
+          const result = await response.json();
+          console.log('Sarvam AI TTS successful');
+          return new Response(
+            JSON.stringify({ audioContent: result.audios[0], provider: 'sarvam' }),
+            {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        } else {
+          const error = await response.text();
+          console.warn('Sarvam AI TTS failed, attempting fallback:', error);
+        }
+      } catch (sarvamError) {
+        console.warn('Sarvam AI TTS error, attempting fallback:', sarvamError);
+      }
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    // Fallback to OpenAI
+    if (OPENAI_API_KEY) {
+      console.log('Attempting TTS with OpenAI (fallback)');
+      const response = await fetch('https://api.openai.com/v1/audio/speech', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'tts-1',
+          input: text,
+          voice: 'alloy',
+          response_format: 'mp3',
+        }),
+      });
 
-    return new Response(
-      JSON.stringify({ audioContent: base64Audio }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      if (!response.ok) {
+        const error = await response.text();
+        console.error('OpenAI TTS error:', error);
+        throw new Error(`Both Sarvam and OpenAI TTS failed. OpenAI error: ${error}`);
       }
-    );
+
+      const arrayBuffer = await response.arrayBuffer();
+      const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      console.log('OpenAI TTS successful (fallback)');
+
+      return new Response(
+        JSON.stringify({ audioContent: base64Audio, provider: 'openai' }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    throw new Error('No API keys configured for text-to-speech');
   } catch (error) {
     console.error('Error in text-to-speech:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
