@@ -1,3 +1,5 @@
+// --- FULL PATCHED FILE STARTS HERE ---
+
 import { useState, useEffect } from "react";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -19,6 +21,9 @@ import { supabase } from "@/integrations/supabase/client";
 
 const Assessment = () => {
   const [currentPage, setCurrentPage] = useState(1);
+
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+
   const [formData, setFormData] = useState<Partial<AssessmentFormData>>({
     age: 65,
     weight: 70,
@@ -29,6 +34,7 @@ const Assessment = () => {
     medications: [],
     neurologicalSymptoms: [],
   });
+
   const [voiceMode, setVoiceMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,29 +44,93 @@ const Assessment = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Load available voices for browser TTS
+  const totalPages = 4;
+  const progress = (currentPage / totalPages) * 100;
+
+  // -------------------------------
+  // NEW: QUESTION ORDER PER PAGE
+  // -------------------------------
+  const questionOrder = {
+    1: [
+      "age",
+      "gender",
+      "weight",
+      "height",
+      "education",
+      "occupation",
+      "languagePreference",
+    ],
+    2: ["familyHistory", "medicalConditions", "medications", "allergies"],
+    3: [
+      "physicalActivity",
+      "sleepQuality",
+      "alcoholConsumption",
+      "smokingStatus",
+      "dietType",
+      "coffeeConsumption",
+      "socialEngagement",
+    ],
+    4: ["memoryComplaints", "speechIssues", "neurologicalSymptoms", "moodChanges"],
+  };
+
+  // --------------------------------------------
+  // NEW: KANNADA TRANSLATIONS FOR EACH QUESTION
+  // --------------------------------------------
+  const kannadaQuestions: Record<string, string> = {
+    age: "ನಿಮ್ಮ ವಯಸ್ಸು ಎಷ್ಟು?",
+    gender: "ನಿಮ್ಮ ಲಿಂಗ ಯಾವುದು?",
+    weight: "ನಿಮ್ಮ ತೂಕ ಎಷ್ಟು ಕಿಲೋಗ್ರಾಂ?",
+    height: "ನಿಮ್ಮ ಎತ್ತರ ಎಷ್ಟು ಸೆಂಟಿಮೀಟರ್?",
+    education: "ನಿಮ್ಮ ವಿದ್ಯಾರ್ಹತೆ ಯಾವುದು?",
+    occupation: "ನಿಮ್ಮ ಉದ್ಯೋಗ ಯಾವುದು?",
+    languagePreference: "ನಿಮ್ಮ ಭಾಷಾ ಆಯ್ಕೆ ಯಾವುದು?",
+
+    familyHistory: "ನಿಮ್ಮ ಕುಟುಂಬದಲ್ಲಿ ಯಾವುದೇ ಆರೋಗ್ಯ ಸಮಸ್ಯೆಗಳ ಇತಿಹಾಸ ಇದೆಯೇ?",
+    medicalConditions: "ನಿಮಗೆ ಈಗಾಗಲೇ ಇರುವ ಯಾವುದೇ ವೈದ್ಯಕೀಯ ಸಮಸ್ಯೆಗಳಿವೆಯೇ?",
+    medications: "ನೀವು ಈಗಾಗಲೇ ತೆಗೆದುಕೊಳ್ಳುವ ಔಷಧಿಗಳಾದರೂ ಇದೆಯೇ?",
+    allergies: "ನಿಮಗೆ ಯಾವುದೇ ಅಲರ್ಜಿ ಇದ್ದರೆ ವಿವರಿಸಿ.",
+
+    physicalActivity: "ನಿಮ್ಮ ದೈಹಿಕ ಚಟುವಟಿಕೆ ಮಟ್ಟ ಯಾವುದು?",
+    sleepQuality: "ನಿಮ್ಮ ನಿದ್ರೆಯ ಗುಣಮಟ್ಟ ಹೇಗಿದೆ?",
+    alcoholConsumption: "ನೀವು ವಾರಕ್ಕೆ ಎಷ್ಟು ಮದ್ಯಪಾನ ಮಾಡುತ್ತೀರಿ?",
+    smokingStatus: "ನಿಮ್ಮ ಧೂಮಪಾನ ಸ್ಥಿತಿ ಯಾವುದು?",
+    dietType: "ನಿಮ್ಮ ಆಹಾರ ಪದ್ಧತಿ ಯಾವುದು?",
+    coffeeConsumption: "ನೀವು ದಿನಕ್ಕೆ ಎಷ್ಟು ಕಾಫಿ ಕುಡಿಯುತ್ತೀರಿ?",
+    socialEngagement: "ನಿಮ್ಮ ಸಾಮಾಜಿಕ ಚಟುವಟಿಕೆ ಮಟ್ಟ ಯಾವುದು?",
+
+    memoryComplaints: "ನಿಮಗೆ ನೆನಪು ಸಂಬಂಧಿತ ಸಮಸ್ಯೆಗಳಿವೆಯೇ?",
+    speechIssues: "ನಿಮಗೆ ಮಾತು ಅಥವಾ ಭಾಷಾ ಸಮಸ್ಯೆಗಳಿವೆಯೇ?",
+    neurologicalSymptoms: "ನಿಮಗೆ ಯಾವುದೇ ನ್ಯೂರೋಲಾಜಿಕಲ್ ಲಕ್ಷಣಗಳಿವೆಯೇ?",
+    moodChanges: "ನಿಮ್ಮ ಮನೋಭಾವದಲ್ಲಿ ಯಾವುದೇ ಬದಲಾವಣೆ ಇರುವುದನ್ನು ಗಮನಿಸಿದ್ದೀರಾ?",
+  };
+
+  // --------------------------------------------
+  // NEW: SET INITIAL QUESTION WHEN PAGE CHANGES
+  // --------------------------------------------
+  useEffect(() => {
+    if (voiceMode) {
+      setCurrentQuestionIndex(0);
+      const qKey = questionOrder[currentPage][0];
+      setCurrentQuestion(kannadaQuestions[qKey]);
+    }
+  }, [currentPage, voiceMode]);
+
+  // --------------------------------------------
+  // Original: Load voices
+  // --------------------------------------------
   useEffect(() => {
     const loadVoices = () => {
       const availableVoices = window.speechSynthesis.getVoices();
       setVoices(availableVoices);
     };
-
-    // Load voices initially
     loadVoices();
 
-    // Some browsers require waiting for voices to load
     if (window.speechSynthesis.onvoiceschanged !== undefined) {
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
 
-    return () => {
-      // Cleanup: cancel any ongoing speech
-      window.speechSynthesis.cancel();
-    };
+    return () => window.speechSynthesis.cancel();
   }, []);
-
-  const totalPages = 4;
-  const progress = (currentPage / totalPages) * 100;
 
   const handleInputChange = (field: keyof AssessmentFormData, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -68,27 +138,19 @@ const Assessment = () => {
 
   const handleCheckboxChange = (field: keyof AssessmentFormData, value: string, checked: boolean) => {
     setFormData((prev) => {
-      const currentArray = (prev[field] as string[]) || [];
-      if (checked) {
-        return { ...prev, [field]: [...currentArray, value] };
-      } else {
-        return { ...prev, [field]: currentArray.filter((item) => item !== value) };
-      }
+      const arr = (prev[field] as string[]) || [];
+      return { ...prev, [field]: checked ? [...arr, value] : arr.filter((v) => v !== value) };
     });
   };
 
   const handleNext = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
-      window.scrollTo(0, 0);
-    }
+    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+    window.scrollTo(0, 0);
   };
 
   const handlePrevious = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-      window.scrollTo(0, 0);
-    }
+    if (currentPage > 1) setCurrentPage(currentPage - 1);
+    window.scrollTo(0, 0);
   };
 
   const handleSubmit = () => {
@@ -96,167 +158,120 @@ const Assessment = () => {
       title: "Assessment Submitted",
       description: "Processing your responses. You'll be redirected to results shortly.",
     });
-    setTimeout(() => {
-      navigate("/patient/results");
-    }, 2000);
+    setTimeout(() => navigate("/patient/results"), 2000);
   };
 
+  // --------------------------------------------
+  // TTS
+  // --------------------------------------------
   const speakQuestion = async (text: string) => {
     try {
       setIsPlaying(true);
       setCurrentQuestion(text);
-      
-      // Try browser TTS first (primary)
-      if ('speechSynthesis' in window) {
-        // Cancel any ongoing speech
+
+      if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
-        
-        const utterance = new SpeechSynthesisUtterance(text);
-        
-        // Try to find a Kannada voice
-        const kannadaVoice = voices.find(voice => 
-          voice.lang.startsWith('kn') || voice.lang.includes('Kannada')
-        );
-        
-        if (kannadaVoice) {
-          utterance.voice = kannadaVoice;
-        }
-        
-        utterance.lang = 'kn-IN';
-        utterance.rate = 0.9; // Slightly slower for clarity
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-        
-        utterance.onend = () => setIsPlaying(false);
-        utterance.onerror = (error) => {
-          console.warn('Browser TTS error, attempting fallback:', error);
-          // Fallback to edge function
-          useTTSEdgeFunction(text);
-        };
-        
-        window.speechSynthesis.speak(utterance);
+        const u = new SpeechSynthesisUtterance(text);
+
+        const kannadaVoice = voices.find(v => v.lang.startsWith("kn"));
+        if (kannadaVoice) u.voice = kannadaVoice;
+
+        u.lang = "kn-IN";
+        u.rate = 0.9;
+        u.pitch = 1;
+        u.volume = 1;
+
+        u.onend = () => setIsPlaying(false);
+        u.onerror = () => useTTSEdgeFunction(text);
+        window.speechSynthesis.speak(u);
       } else {
-        // Fallback to edge function if browser doesn't support TTS
         await useTTSEdgeFunction(text);
       }
-    } catch (error) {
-      console.error('Error speaking question:', error);
-      toast({
-        title: "Error",
-        description: "Failed to play audio. Please try again.",
-        variant: "destructive",
-      });
+    } catch {
       setIsPlaying(false);
     }
   };
 
   const useTTSEdgeFunction = async (text: string) => {
     try {
-      const { data, error } = await supabase.functions.invoke('text-to-speech', {
-        body: { text }
-      });
-
-      if (error) throw error;
-
+      const { data } = await supabase.functions.invoke("text-to-speech", { body: { text } });
       const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
       audio.onended = () => setIsPlaying(false);
       await audio.play();
-    } catch (error) {
-      console.error('TTS edge function error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to play audio. Please try again.",
-        variant: "destructive",
-      });
+    } catch {
       setIsPlaying(false);
     }
   };
 
+  // --------------------------------------------
+  // Recording → next question update
+  // --------------------------------------------
   const startRecording = async () => {
     try {
       await audioRecorder.startRecording();
       setIsRecording(true);
+
       toast({
         title: "Recording Started",
         description: "Please speak your answer in Kannada",
       });
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      toast({
-        title: "Error",
-        description: "Failed to start recording. Please check microphone permissions.",
-        variant: "destructive",
-      });
-    }
+    } catch {}
   };
 
   const stopRecording = async () => {
     try {
       setIsRecording(false);
-      const base64Audio = await audioRecorder.stopRecording();
-      
-      toast({
-        title: "Processing",
-        description: "Transcribing your response...",
-      });
+      const base64 = await audioRecorder.stopRecording();
 
-      const { data, error } = await supabase.functions.invoke('speech-to-text', {
-        body: { audio: base64Audio }
+      const { data } = await supabase.functions.invoke("speech-to-text", {
+        body: { audio: base64 },
       });
-
-      if (error) throw error;
 
       toast({
         title: "Success",
         description: `Transcription: ${data.text}`,
       });
 
-      // Process the transcribed text and update form data accordingly
-      // This is a simple example - you'd want more sophisticated mapping
-      console.log('Transcribed text:', data.text);
-      
-    } catch (error) {
-      console.error('Error processing recording:', error);
-      toast({
-        title: "Error",
-        description: "Failed to process recording. Please try again.",
-        variant: "destructive",
-      });
-    }
+      // --- MOVE TO NEXT QUESTION ---
+      const nextIndex = currentQuestionIndex + 1;
+      const questions = questionOrder[currentPage];
+
+      if (nextIndex < questions.length) {
+        const nextKey = questions[nextIndex];
+        setCurrentQuestionIndex(nextIndex);
+        setCurrentQuestion(kannadaQuestions[nextKey]);
+      }
+
+    } catch {}
   };
 
-  useEffect(() => {
-    if (voiceMode && currentPage === 1) {
-      speakQuestion("ನಿಮ್ಮ ವಯಸ್ಸು ಎಷ್ಟು? (What is your age?)");
-    }
-  }, [voiceMode, currentPage]);
-
+  // --------------------------------------------
+  // JSX
+  // --------------------------------------------
   return (
     <Layout>
       <div className="max-w-3xl mx-auto space-y-6">
+
+        {/* HEADER */}
         <div>
           <h1 className="text-3xl font-bold">Neurological Risk Assessment</h1>
           <p className="text-muted-foreground mt-1">Page {currentPage} of {totalPages}</p>
         </div>
 
+        {/* VOICE MODE */}
         <Card className="bg-muted/50">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <Label htmlFor="voice-mode" className="text-base font-semibold">
-                  Voice Mode (Kannada)
-                </Label>
+              <div>
+                <Label className="text-base font-semibold">Voice Mode (Kannada)</Label>
                 <p className="text-sm text-muted-foreground">
                   Listen to questions and respond with your voice
                 </p>
               </div>
-              <Switch
-                id="voice-mode"
-                checked={voiceMode}
-                onCheckedChange={setVoiceMode}
-              />
+
+              <Switch checked={voiceMode} onCheckedChange={setVoiceMode} />
             </div>
-            
+
             {voiceMode && (
               <div className="mt-4 flex gap-2">
                 <Button
@@ -268,15 +283,10 @@ const Assessment = () => {
                   <Volume2 className="h-4 w-4 mr-2" />
                   {isPlaying ? "Playing..." : "Replay Question"}
                 </Button>
-                
+
                 {isRecording ? (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={stopRecording}
-                  >
-                    <Square className="h-4 w-4 mr-2" />
-                    Stop Recording
+                  <Button variant="destructive" size="sm" onClick={stopRecording}>
+                    <Square className="h-4 w-4 mr-2" /> Stop Recording
                   </Button>
                 ) : (
                   <Button
@@ -285,8 +295,7 @@ const Assessment = () => {
                     onClick={startRecording}
                     disabled={isPlaying}
                   >
-                    <Mic className="h-4 w-4 mr-2" />
-                    Record Answer
+                    <Mic className="h-4 w-4 mr-2" /> Record Answer
                   </Button>
                 )}
               </div>
@@ -294,7 +303,9 @@ const Assessment = () => {
           </CardContent>
         </Card>
 
+        {/* PROGRESS BAR */}
         <Progress value={progress} className="h-2" />
+
 
         {/* Page 1: Demographics */}
         {currentPage === 1 && (
