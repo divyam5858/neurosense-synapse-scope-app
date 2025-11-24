@@ -169,7 +169,7 @@ const Assessment = () => {
     }
   };
 
-  // SPEAK QUESTION
+  // SPEAK QUESTION - use Sarvam TTS exclusively for consistent audio
   const speakQuestion = async (text: string) => {
     if (!text || text.trim() === "") {
       console.error("No question text provided to speakQuestion");
@@ -177,42 +177,10 @@ const Assessment = () => {
       return;
     }
 
-    console.log("Speaking question:", text);
+    console.log("[Voice] Speaking question via Sarvam TTS:", text);
     setIsPlaying(true);
 
-    // If browser TTS is not available, immediately fall back to Sarvam
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      await playQuestionWithSarvam(text);
-      return;
-    }
-
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-
-      const knVoice = voices.find((v) => v.lang.startsWith("kn"));
-      console.log("Found Kannada voice:", knVoice?.name || "None, using default");
-      if (knVoice) u.voice = knVoice;
-
-      u.lang = "kn-IN";
-      u.rate = 0.9;
-
-      u.onend = () => {
-        console.log("Speech ended");
-        setIsPlaying(false);
-      };
-      u.onerror = (e) => {
-        console.error("Speech error:", e);
-        // Try Sarvam TTS if browser TTS fails
-        void playQuestionWithSarvam(text);
-      };
-
-      window.speechSynthesis.speak(u);
-      console.log("Speech synthesis started");
-    } catch (error) {
-      console.error("Failed to speak, using Sarvam fallback:", error);
-      await playQuestionWithSarvam(text);
-    }
+    await playQuestionWithSarvam(text);
   };
 
   // EXTRACT FEATURES FROM VOICE
