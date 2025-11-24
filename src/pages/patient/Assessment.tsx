@@ -140,6 +140,35 @@ const Assessment = () => {
     speakQuestion(currentQuestion);
   };
 
+  // Play question using Sarvam TTS edge function as fallback
+  const playQuestionWithSarvam = async (text: string) => {
+    try {
+      console.log("Falling back to Sarvam TTS for text:", text);
+      const { data, error } = await supabase.functions.invoke("text-to-speech", {
+        body: { text },
+      });
+
+      if (error || !data?.audioContent) {
+        console.error("Sarvam TTS error or no audioContent:", error || data);
+        toast({ title: "Speech Error", description: "Unable to generate audio.", variant: "destructive" });
+        setIsPlaying(false);
+        return;
+      }
+
+      const audio = new Audio(`data:audio/mp3;base64,${data.audioContent}`);
+      audio.onended = () => {
+        console.log("Sarvam audio ended");
+        setIsPlaying(false);
+      };
+      await audio.play();
+      console.log("Sarvam audio playback started");
+    } catch (err) {
+      console.error("Sarvam TTS playback failed:", err);
+      toast({ title: "Speech Error", description: "Audio playback failed.", variant: "destructive" });
+      setIsPlaying(false);
+    }
+  };
+
   // SPEAK QUESTION
   const speakQuestion = async (text: string) => {
     if (!text || text.trim() === "") {
@@ -150,6 +179,12 @@ const Assessment = () => {
 
     console.log("Speaking question:", text);
     setIsPlaying(true);
+
+    // If browser TTS is not available, immediately fall back to Sarvam
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      await playQuestionWithSarvam(text);
+      return;
+    }
 
     try {
       window.speechSynthesis.cancel();
@@ -168,16 +203,15 @@ const Assessment = () => {
       };
       u.onerror = (e) => {
         console.error("Speech error:", e);
-        setIsPlaying(false);
-        toast({ title: "Speech Error", description: "Failed to play audio", variant: "destructive" });
+        // Try Sarvam TTS if browser TTS fails
+        void playQuestionWithSarvam(text);
       };
 
       window.speechSynthesis.speak(u);
       console.log("Speech synthesis started");
     } catch (error) {
-      console.error("Failed to speak:", error);
-      setIsPlaying(false);
-      toast({ title: "Error", description: "Failed to play audio", variant: "destructive" });
+      console.error("Failed to speak, using Sarvam fallback:", error);
+      await playQuestionWithSarvam(text);
     }
   };
 
