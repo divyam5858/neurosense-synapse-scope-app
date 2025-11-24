@@ -37,6 +37,7 @@ const Assessment = () => {
   const [voiceMode, setVoiceMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [voiceStarted, setVoiceStarted] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [audioRecorder] = useState(() => new AudioRecorder());
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -93,21 +94,19 @@ const Assessment = () => {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
-  // Ensure currentQuestion is always set and auto-speak when voice mode enabled
+  // Ensure currentQuestion is always set and reset voiceStarted on page change
   useEffect(() => {
-    if (!voiceMode) return;
+    if (!voiceMode) {
+      setVoiceStarted(false);
+      return;
+    }
     const firstKey = questionOrder[currentPage][0];
     setCurrentQuestionIndex(0);
     const questionText = kannadaQuestions[firstKey];
     setCurrentQuestion(questionText);
-    
-    // Auto-speak first question when voice mode is enabled
-    if (voices.length > 0) {
-      setTimeout(() => {
-        speakQuestion(questionText);
-      }, 500);
-    }
-  }, [voiceMode, currentPage, voices]);
+    setVoiceStarted(false); // Reset when page changes
+    console.log("Voice mode enabled, current question set:", questionText);
+  }, [voiceMode, currentPage]);
 
   const handleInputChange = (field: keyof AssessmentFormData, value: any) =>
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -134,13 +133,22 @@ const Assessment = () => {
     setTimeout(() => navigate("/patient/results"), 2000);
   };
 
+  // Start voice assessment with first question
+  const startVoiceAssessment = () => {
+    setVoiceStarted(true);
+    console.log("Starting voice assessment");
+    speakQuestion(currentQuestion);
+  };
+
   // SPEAK QUESTION
   const speakQuestion = async (text: string) => {
     if (!text || text.trim() === "") {
+      console.error("No question text provided to speakQuestion");
       toast({ title: "Error", description: "No question available to read.", variant: "destructive" });
       return;
     }
 
+    console.log("Speaking question:", text);
     setIsPlaying(true);
 
     try {
@@ -148,17 +156,28 @@ const Assessment = () => {
       const u = new SpeechSynthesisUtterance(text);
 
       const knVoice = voices.find((v) => v.lang.startsWith("kn"));
+      console.log("Found Kannada voice:", knVoice?.name || "None, using default");
       if (knVoice) u.voice = knVoice;
 
       u.lang = "kn-IN";
       u.rate = 0.9;
 
-      u.onend = () => setIsPlaying(false);
-      u.onerror = () => setIsPlaying(false);
+      u.onend = () => {
+        console.log("Speech ended");
+        setIsPlaying(false);
+      };
+      u.onerror = (e) => {
+        console.error("Speech error:", e);
+        setIsPlaying(false);
+        toast({ title: "Speech Error", description: "Failed to play audio", variant: "destructive" });
+      };
 
       window.speechSynthesis.speak(u);
-    } catch {
+      console.log("Speech synthesis started");
+    } catch (error) {
+      console.error("Failed to speak:", error);
       setIsPlaying(false);
+      toast({ title: "Error", description: "Failed to play audio", variant: "destructive" });
     }
   };
 
@@ -318,7 +337,24 @@ const Assessment = () => {
               <Switch checked={voiceMode} onCheckedChange={setVoiceMode} />
             </div>
 
-            {voiceMode && (
+            {voiceMode && !voiceStarted && (
+              <div className="mt-4">
+                <Button
+                  variant="default"
+                  size="lg"
+                  onClick={startVoiceAssessment}
+                  className="w-full"
+                >
+                  <Volume2 className="h-5 w-5 mr-2" />
+                  Start Voice Assessment
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2 text-center">
+                  Click to begin - questions will be read aloud automatically
+                </p>
+              </div>
+            )}
+
+            {voiceMode && voiceStarted && (
               <div className="mt-4 space-y-4">
                 <div className="p-3 bg-background rounded-lg border">
                   <p className="text-sm font-medium mb-1">Current Question ({currentQuestionIndex + 1}/{questionOrder[currentPage].length}):</p>
