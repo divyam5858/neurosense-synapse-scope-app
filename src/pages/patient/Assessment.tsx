@@ -93,12 +93,20 @@ const Assessment = () => {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
-  // Ensure currentQuestion is always set
+  // Ensure currentQuestion is always set and auto-speak when voice mode enabled
   useEffect(() => {
     if (!voiceMode) return;
     const firstKey = questionOrder[currentPage][0];
     setCurrentQuestionIndex(0);
-    setCurrentQuestion(kannadaQuestions[firstKey]);
+    const questionText = kannadaQuestions[firstKey];
+    setCurrentQuestion(questionText);
+    
+    // Auto-speak first question when voice mode is enabled
+    if (voices.length > 0) {
+      setTimeout(() => {
+        speakQuestion(questionText);
+      }, 500);
+    }
   }, [voiceMode, currentPage, voices]);
 
   const handleInputChange = (field: keyof AssessmentFormData, value: any) =>
@@ -154,6 +162,87 @@ const Assessment = () => {
     }
   };
 
+  // EXTRACT FEATURES FROM VOICE
+  const extractFeaturesFromVoice = (text: string, fieldKey: string) => {
+    const lowerText = text.toLowerCase();
+    
+    // Number extraction for age, weight, height
+    const numbers = text.match(/\d+/g);
+    const numValue = numbers ? parseInt(numbers[0]) : null;
+
+    switch (fieldKey) {
+      case "age":
+      case "weight":
+      case "height":
+      case "alcoholConsumption":
+      case "coffeeConsumption":
+        if (numValue) handleInputChange(fieldKey as keyof AssessmentFormData, numValue);
+        break;
+
+      case "gender":
+        if (lowerText.includes("male") || lowerText.includes("ಗಂಡು")) handleInputChange("gender", "Male");
+        else if (lowerText.includes("female") || lowerText.includes("ಹೆಣ್ಣು")) handleInputChange("gender", "Female");
+        break;
+
+      case "education":
+        if (lowerText.includes("high") || lowerText.includes("ಹೈಸ್ಕೂಲ್")) handleInputChange("education", "high-school");
+        else if (lowerText.includes("bachelor") || lowerText.includes("ಪದವಿ")) handleInputChange("education", "bachelors");
+        else if (lowerText.includes("master") || lowerText.includes("ಸ್ನಾತಕೋತ್ತರ")) handleInputChange("education", "masters");
+        break;
+
+      case "physicalActivity":
+        if (lowerText.includes("sedentary") || lowerText.includes("ಕುಳಿತಿರುವ")) handleInputChange("physicalActivity", "sedentary");
+        else if (lowerText.includes("light") || lowerText.includes("ಹಗುರ")) handleInputChange("physicalActivity", "light");
+        else if (lowerText.includes("moderate") || lowerText.includes("ಮಧ್ಯಮ")) handleInputChange("physicalActivity", "moderate");
+        else if (lowerText.includes("active") || lowerText.includes("ಸಕ್ರಿಯ")) handleInputChange("physicalActivity", "active");
+        break;
+
+      case "sleepQuality":
+        if (lowerText.includes("poor") || lowerText.includes("ಕೆಟ್ಟ")) handleInputChange("sleepQuality", "poor");
+        else if (lowerText.includes("fair") || lowerText.includes("ಸರಾಸರಿ")) handleInputChange("sleepQuality", "fair");
+        else if (lowerText.includes("good") || lowerText.includes("ಒಳ್ಳೆಯ")) handleInputChange("sleepQuality", "good");
+        else if (lowerText.includes("excellent") || lowerText.includes("ಅತ್ಯುತ್ತಮ")) handleInputChange("sleepQuality", "excellent");
+        break;
+
+      case "smokingStatus":
+        if (lowerText.includes("never") || lowerText.includes("ಎಂದೂ ಇಲ್ಲ")) handleInputChange("smokingStatus", "never");
+        else if (lowerText.includes("former") || lowerText.includes("ಹಿಂದೆ")) handleInputChange("smokingStatus", "former");
+        else if (lowerText.includes("current") || lowerText.includes("ಈಗ")) handleInputChange("smokingStatus", "current");
+        break;
+
+      case "dietType":
+        if (lowerText.includes("vegetarian") || lowerText.includes("ಸಸ್ಯಾಹಾರಿ")) handleInputChange("dietType", "vegetarian");
+        else if (lowerText.includes("non-veg") || lowerText.includes("ಮಾಂಸಾಹಾರಿ")) handleInputChange("dietType", "non-vegetarian");
+        else if (lowerText.includes("vegan") || lowerText.includes("ವೀಗನ್")) handleInputChange("dietType", "vegan");
+        break;
+
+      case "socialEngagement":
+        if (lowerText.includes("low") || lowerText.includes("ಕಡಿಮೆ")) handleInputChange("socialEngagement", "low");
+        else if (lowerText.includes("moderate") || lowerText.includes("ಮಧ್ಯಮ")) handleInputChange("socialEngagement", "moderate");
+        else if (lowerText.includes("high") || lowerText.includes("ಹೆಚ್ಚು")) handleInputChange("socialEngagement", "high");
+        break;
+
+      case "memoryComplaints":
+      case "speechIssues":
+        if (lowerText.includes("yes") || lowerText.includes("ಹೌದು") || lowerText.includes("ಇದೆ")) handleInputChange(fieldKey as keyof AssessmentFormData, "yes");
+        else if (lowerText.includes("no") || lowerText.includes("ಇಲ್ಲ")) handleInputChange(fieldKey as keyof AssessmentFormData, "no");
+        break;
+
+      case "moodChanges":
+        handleInputChange("moodChanges", text);
+        break;
+
+      case "occupation":
+      case "languagePreference":
+      case "allergies":
+        handleInputChange(fieldKey as keyof AssessmentFormData, text);
+        break;
+
+      default:
+        break;
+    }
+  };
+
   // RECORDING
   const startRecording = async () => {
     await audioRecorder.startRecording();
@@ -165,20 +254,45 @@ const Assessment = () => {
     setIsRecording(false);
     const base64 = await audioRecorder.stopRecording();
 
-    const { data } = await supabase.functions.invoke("speech-to-text", {
-      body: { audio: base64 },
-    });
+    try {
+      const { data, error } = await supabase.functions.invoke("speech-to-text", {
+        body: { audio: base64 },
+      });
 
-    toast({ title: "Success", description: `Transcription: ${data.text}` });
+      if (error) throw error;
 
-    // NEXT QUESTION
-    const nextIndex = currentQuestionIndex + 1;
-    const questions = questionOrder[currentPage];
+      const transcribedText = data?.text || "";
+      toast({ title: "Success", description: `Transcription: ${transcribedText}` });
 
-    if (nextIndex < questions.length) {
-      const nextKey = questions[nextIndex];
-      setCurrentQuestionIndex(nextIndex);
-      setCurrentQuestion(kannadaQuestions[nextKey]);
+      // EXTRACT FEATURES
+      const questions = questionOrder[currentPage];
+      const currentFieldKey = questions[currentQuestionIndex];
+      extractFeaturesFromVoice(transcribedText, currentFieldKey);
+
+      // AUTO-ADVANCE TO NEXT QUESTION
+      const nextIndex = currentQuestionIndex + 1;
+
+      if (nextIndex < questions.length) {
+        const nextKey = questions[nextIndex];
+        setCurrentQuestionIndex(nextIndex);
+        setCurrentQuestion(kannadaQuestions[nextKey]);
+        
+        // AUTO-SPEAK NEXT QUESTION
+        setTimeout(() => {
+          speakQuestion(kannadaQuestions[nextKey]);
+        }, 1000);
+      } else {
+        toast({ 
+          title: "Section Complete", 
+          description: "All questions answered for this section!",
+        });
+      }
+    } catch (error) {
+      toast({ 
+        title: "Error", 
+        description: "Failed to process voice input",
+        variant: "destructive" 
+      });
     }
   };
 
@@ -205,33 +319,40 @@ const Assessment = () => {
             </div>
 
             {voiceMode && (
-              <div className="mt-4 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => speakQuestion(currentQuestion)}
-                  disabled={isPlaying || isRecording}
-                >
-                  <Volume2 className="h-4 w-4 mr-2" />
-                  {isPlaying ? "Playing..." : "Replay Question"}
-                </Button>
+              <div className="mt-4 space-y-4">
+                <div className="p-3 bg-background rounded-lg border">
+                  <p className="text-sm font-medium mb-1">Current Question ({currentQuestionIndex + 1}/{questionOrder[currentPage].length}):</p>
+                  <p className="text-base">{currentQuestion}</p>
+                </div>
 
-                {isRecording ? (
-                  <Button variant="destructive" size="sm" onClick={stopRecording}>
-                    <Square className="h-4 w-4 mr-2" />
-                    Stop
-                  </Button>
-                ) : (
+                <div className="flex gap-2">
                   <Button
-                    variant="default"
+                    variant="outline"
                     size="sm"
-                    onClick={startRecording}
-                    disabled={isPlaying}
+                    onClick={() => speakQuestion(currentQuestion)}
+                    disabled={isPlaying || isRecording}
                   >
-                    <Mic className="h-4 w-4 mr-2" />
-                    Record
+                    <Volume2 className="h-4 w-4 mr-2" />
+                    {isPlaying ? "Playing..." : "Replay Question"}
                   </Button>
-                )}
+
+                  {isRecording ? (
+                    <Button variant="destructive" size="sm" onClick={stopRecording}>
+                      <Square className="h-4 w-4 mr-2" />
+                      Stop Recording
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={startRecording}
+                      disabled={isPlaying}
+                    >
+                      <Mic className="h-4 w-4 mr-2" />
+                      Answer via Voice
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>
